@@ -19,11 +19,10 @@
 #define HREF_GPIO_NUM  47
 #define PCLK_GPIO_NUM  13
 
-const char* ssid = "Pixel 4a";
-const char* pass = "password";
+const char* ssid = "ESP32-CAM";
+const char* pass = "12345678";
 
 WebServer server(80);
-String outbox = "";
 
 void handleSnap() {
   camera_fb_t * fb = esp_camera_fb_get();
@@ -74,11 +73,11 @@ void startCamera() {
 
   config.pixel_format = PIXFORMAT_GRAYSCALE;
   config.frame_size = FRAMESIZE_QQVGA;
-  config.jpeg_quality = 30; //Try to make this 10 later
+  config.jpeg_quality = 30;
   config.fb_count = 1;
   config.fb_location = CAMERA_FB_IN_PSRAM;
   config.grab_mode = CAMERA_GRAB_WHEN_EMPTY;
-  config.xclk_freq_hz = 10000000; //Try going to 18000000
+  config.xclk_freq_hz = 10000000;
 
   esp_err_t err = esp_camera_init(&config);
 
@@ -113,23 +112,16 @@ void startCamera() {
   s->set_ae_level(s, 0);
 
   s->set_gainceiling(s, (gainceiling_t)4);
-
-  
-  Serial.printf("Width: %d Height: %d Len:%d\n",
-    fb->width,
-    fb->height,
-    fb->len
-  );
-
-  Serial.printf("Pixel format %d\n", config.pixel_format);
 }
 
 void setup() {
   Serial.begin(115200);
 
-  WiFi.begin(ssid, pass);
-  while (WiFi.status() != WL_CONNECTED) { delay(500); Serial.print(".");}
-  Serial.printf("\nIP: %s\n", WiFi.localIP().toString().c_str());
+  WiFi.mode(WIFI_AP);
+  WiFi.softAP(ssid, pass);
+
+  IPAddress IP = WiFi.softAPIP();
+  Serial.printf("SSID: %s\nIP: %s\n", ssid, IP.toString().c_str());
 
   startCamera();
   delay(2000);
