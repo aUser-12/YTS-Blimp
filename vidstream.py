@@ -1,28 +1,30 @@
 import io
+import socket
+import struct
 import threading
 import time
-import tkinter as  tk
+import tkinter as tk
 from datetime import datetime
 
 import numpy as np
-import requests
 from PIL import Image, ImageTk
 
-ESP_IP = ""
-SNAPSHOT_URL = f"http://{ESP_IP}/snapshot"
-REFRESH_MS = 30
-CAM_W, CAM_H = 160, 120
+UDP_HOST  = "0.0.0.0"  #listen to everythign
+UDP_PORT  = 5005
+CAM_W, CAM_H   = 160, 120
 DISP_W, DISP_H = 640, 480
+SOCK_BUF  = 65536        #buffer size
 
 
 class ESP32CameraGUI:
-    def __init__(self, root):
+    def __init__(self, root: tk.Tk):
         self.root = root
-        self.root.title("ESP32 Camera")
+        self.root.title("ESP CAm")
         self.root.resizable(False, False)
+
         self.current_pil = None
-        self.current_tk = None
-        self.running = True
+        self.current_tk  = None
+        self.running     = True
 
         self.image_label = tk.Label(root, bg="black", width=DISP_W, height=DISP_H)
         self.image_label.pack()
@@ -32,42 +34,67 @@ class ESP32CameraGUI:
             text="Capture Frame",
             command=self.capture,
             font=("Helvetica", 12, "bold"),
-            bg="#2ecc71",
-            fg="white",
+            bg="#2ecc71", fg="white",
             activebackground="#27ae60",
-            relief="flat",
-            padx=20,
-            pady=8,
+            relief="flat", padx=20, pady=8,
         ).pack(pady=10)
 
-        threading.Thread(target=self._fetch_loop, daemon=True).start()
+        threading.Thread(target=self._recv_loop, daemon=True).start()
 
-    def _fetch_loop(self):
+    
+    def _recv_loop(self):
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 512 * 1024)
+        sock.bind((UDP_HOST, UDP_PORT))
+        sock.settimeout(2.0)
+        print(f"Listening for UDP on port {UDP_PORT}…")
+
         while self.running:
             try:
-                r = requests.get(SNAPSHOT_URL, timeout=2)
-                r.raise_for_status()
+                # ── Step 1: receive the 4-byte frame-length header ────────────
+                header, _ = sock.recvfrom(4)
+                if len(header) != 4:
+                    continue
+                expected = struct.unpack(">I", header)[0]   # big-endian uint32
 
-                raw = r.content
-                expected = CAM_W * CAM_H
+                if expected == 0 or expected > 1_000_000:   # sanity check
+                    print(f"Bad frame length: {expected}")
+                    continue
 
-                if len(raw) == expected:
-                    # ── Raw grayscale bytes ──────────────────────────
+                # ── Step 2: collect chunks until we have the full frame ───────
+                buf = bytearray()
+                sock.settimeout(1.0)                         # tighter timeout per chunk
+                while len(buf) < expected:
+                    try:
+                        chunk, _ = sock.recvfrom(SOCK_BUF)
+                        buf.extend(chunk)
+                    except socket.timeout:
+                        print("Timeout waiting for frame data — dropping partial frame")
+                        buf.clear()
+                        break
+                sock.settimeout(2.0)                         # restore header timeout
+
+                if len(buf) < expected:
+                    continue                                 # incomplete frame, skip
+
+                raw = bytes(buf[:expected])
+
+                # ── Step 3: decode ────────────────────────────────────────────
+                if len(raw) == CAM_W * CAM_H:
                     arr = np.frombuffer(raw, dtype=np.uint8).reshape((CAM_H, CAM_W))
                     img = Image.fromarray(arr, mode="L").convert("RGB")
                 else:
-                    # ── Try JPEG decode as fallback ──────────────────
                     img = Image.open(io.BytesIO(raw)).convert("RGB")
 
                 self.current_pil = img.copy()
-                display = img.resize((DISP_W, DISP_H), Image.Resampling.NEAREST)
-                tk_img = ImageTk.PhotoImage(display)
+                display  = img.resize((DISP_W, DISP_H), Image.Resampling.NEAREST)
+                tk_img   = ImageTk.PhotoImage(display)
                 self.root.after(0, self._update_display, tk_img)
 
+            except socket.timeout:
+                pass    # no data yet, loop again
             except Exception as e:
-                print("Fetch error:", e)
-
-            time.sleep(REFRESH_MS / 1000)
+                print("Recv error:", e)
 
     def _update_display(self, tk_img):
         self.current_tk = tk_img
@@ -80,11 +107,12 @@ class ESP32CameraGUI:
         self.current_pil.save(filename)
         print("Saved:", filename)
 
-        
+
 if __name__ == "__main__":
     root = tk.Tk()
-    app = ESP32CameraGUI(root)
+    app  = ESP32CameraGUI(root)
     root.protocol(
-        "WM_DELETE_WINDOW", lambda: (setattr(app, "running", False), root.destroy())
+        "WM_DELETE_WINDOW",
+        lambda: (setattr(app, "running", False), root.destroy())
     )
     root.mainloop()
