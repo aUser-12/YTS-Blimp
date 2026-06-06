@@ -54,7 +54,7 @@ void streamFrame(camera_fb_t* fb) {
     udp.write(fb->buf + offset, chunk);
     udp.endPacket();
     offset += chunk;
-    delayMicroseconds(200);             //pause dont lfood
+    delayMicroseconds(50);             //pause dont lfood
   }
 }
 
@@ -86,10 +86,10 @@ void startCamera() {
   config.pixel_format = PIXFORMAT_GRAYSCALE;
   config.frame_size = FRAMESIZE_QQVGA;
   config.jpeg_quality = 30;
-  config.fb_count = 1;
+  config.fb_count = 2;
   config.fb_location  = CAMERA_FB_IN_PSRAM;
-  config.grab_mode = CAMERA_GRAB_WHEN_EMPTY;
-  config.xclk_freq_hz = 10000000;
+  config.grab_mode = CAMERA_GRAB_LATEST;
+  config.xclk_freq_hz = 20000000;
 
   if (esp_camera_init(&config) != ESP_OK) {
     Serial.println("Camera init failed");
